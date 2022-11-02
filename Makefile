@@ -9,13 +9,19 @@ PROTOBUF_SRC = ${VELOX_BIN}/_deps/protobuf-src/src
 XXHASH_SRC = ${VELOX_ROOT}/velox/external/xxhash
 
 INCLUDES = -I${VELOX_SRC} -I${FOLLY_SRC} -I${FOLLY_SRC}/../folly-build -I${XSIMD_SRC} -I${GTEST_SRC} -I${PROTOBUF_SRC} -I${VELOX_GEN} -I${XXHASH_SRC}
-FLAGS = -O3 -std=gnu++17 -mavx
+FLAGS = -O3 -std=gnu++17 -mavx -pthread
 
 VELOX_LIB = $(shell find ${VELOX_BIN} -name "libvelox*.a")
 FOLLY_LIB = ${FOLLY_SRC}/../folly-build/libfolly.a
-PROTO_LIB = ${VELOX_BIN}/_deps/protobug-build/libprotobuf-lite.a ${VELOX_BIN}/_deps/protobug-build/libprotoc.a
+PROTO_LIB = ${VELOX_BIN}/_deps/protobuf-build/libprotobuf.a ${VELOX_BIN}/_deps/protobuf-build/libprotoc.a
 
-LINKS = ${VELOX_LIB} ${FOLLY_LIB} -lglog -lgflags -lpthread -lfmt -ldl -levent -ldouble-conversion -lre2 -lboost_atomic -lboost_program_options -lboost_context -lboost_filesystem -lboost_regex -lboost_thread -lboost_system -lboost_date_time -L/usr/lib64
+VELOX_ARCHIVES = ${VELOX_LIB} ${FOLLY_LIB} ${PROTO_LIB}
+SHARED_LIBRARIES = -lglog -lgflags -lpthread -lfmt -ldl -levent -ldouble-conversion -lre2 -lboost_atomic -lboost_program_options -lboost_context -lboost_filesystem -lboost_regex -lboost_thread -lboost_system -lboost_date_time -L/usr/lib64 -lsnappy -llz4 -lzstd -lz
 
-test:
-	c++ from_substrait.cpp -O3 -std=c++17 ${INCLUDES} ${FLAGS} ${LINKS} -o from_substrait
+.DEFAULT_GOAL = test
+
+from_substrait.o: from_substrait.cpp
+	c++ from_substrait.cpp ${INCLUDES} ${FLAGS} -c -o from_substrait.o
+
+test: from_substrait.o
+	c++ ${FLAGS} from_substrait.o -Wl,--start-group ${VELOX_ARCHIVES} ${SHARED_LIBRARIES} -Wl,--end-group -o from_substrait	
