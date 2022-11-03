@@ -1,0 +1,74 @@
+{
+  "relations": [
+    {
+      "root": {
+        "input": {
+          "project": {
+            "input": {
+              "read": {
+                "baseSchema": {
+                  "names": [
+                    "ps_partkey",
+                    "ps_suppkey",
+                    "ps_availqty"
+                  ],
+                  "struct": {
+                    "types": [
+                      {
+                        "i32": {
+                          "nullability": "NULLABILITY_NULLABLE"
+                        }
+                      },
+                      {
+                        "i32": {
+                          "nullability": "NULLABILITY_NULLABLE"
+                        }
+                      },
+                      {
+                        "i32": {
+                          "nullability": "NULLABILITY_NULLABLE"
+                        }
+                      }
+                    ],
+                    "nullability": "NULLABILITY_REQUIRED"
+                  }
+                },
+                "projection": {
+                  "select": {
+                    "structItems": [
+                      {}
+                    ]
+                  },
+                  "maintainSingularStruct": true
+                },
+                "local_files": {
+                    "items": [
+                        {
+                            "uri_file" : "file:partsupp.parquet",
+                            "start" : 0,
+                            "length" : 4408022,
+                            "parquet" : {}
+                        }
+                  ]
+                }
+              }
+            },
+            "expressions": [
+              {
+                "selection": {
+                  "directReference": {
+                    "structField": {}
+                  },
+                  "rootReference": {}
+                }
+              }
+            ]
+          }
+        },
+        "names": [
+          "ps_partkey"
+        ]
+      }
+    }
+  ]
+}
