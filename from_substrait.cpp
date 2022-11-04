@@ -92,7 +92,6 @@ int main(int argc, char **argv)
     {
         for(int i = 0; i < split_info.second->paths.size(); i++)
         {
-            std::cout << split_info.second->paths[i] << ", " << split_info.second->starts[i] << ", " << split_info.second->lengths[i] << "\n";
             auto connector_split = std::make_shared<facebook::velox::connector::hive::HiveConnectorSplit>(
                 "test-hive" /*connectorId*/,
                 split_info.second->paths[i],
@@ -106,14 +105,16 @@ int main(int argc, char **argv)
         task->noMoreSplits(split_info.first);
     }
 
-    int num_batches_received = 0;
+    uint64_t num_batches_received = 0;
+    uint64_t num_rows_received = 0;
     while(auto result = task->next())
     {
         std::cout << "Got a result of size " << result->size() << ":\n";
         for(auto i = 0; i < result->size(); i++)
             std::cout << "\t" << result->toString(i) << "\n";
         num_batches_received++;
+        num_rows_received += result->size();
     }
-    std::cout << "Finished with " << num_batches_received << " batches received\n";
+    std::cout << "Finished with " << num_batches_received << " batches, " << num_rows_received << " rows received\n";
     return 0;
 }
