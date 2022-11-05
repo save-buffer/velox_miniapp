@@ -21,10 +21,29 @@ ARROW_LIB = ${VELOX_BIN}/third_party/arrow_ep/install/lib64/*.a
 VELOX_ARCHIVES = ${VELOX_LIB} ${FOLLY_LIB} ${PROTO_LIB} ${MD5_LIB} ${DUCKDB_LIB} ${ARROW_LIB}
 SHARED_LIBRARIES = -lglog -lgflags -lpthread -lfmt -ldl -levent -ldouble-conversion -lre2 -lboost_atomic -lboost_program_options -lboost_context -lboost_filesystem -lboost_regex -lboost_thread -lboost_system -lboost_date_time -L/usr/lib64 -lsnappy -llz4 -lzstd -lz -levent_openssl -lcrypto
 
-.DEFAULT_GOAL = test
+PYTHON_VERSION = $(shell python -c "import sys; print('%d.%d' % sys.version_info[:2])")
+PYTHON_INCLUDE = /usr/include/python${PYTHON_VERSION}
+
+.PHONY: all python cli clean
+.DEFAULT_GOAL = all
 
 from_substrait.o: from_substrait.cpp
-	c++ from_substrait.cpp ${INCLUDES} ${FLAGS} -c -o from_substrait.o
+	c++ from_substrait.cpp -o from_substrait.o ${FLAGS} ${INCLUDES} -c
 
-test: from_substrait.o
-	c++ ${FLAGS} from_substrait.o -Wl,--start-group ${VELOX_ARCHIVES} ${SHARED_LIBRARIES} -Wl,--end-group -o from_substrait	
+from_substrait: from_substrait.o
+	c++ ${FLAGS} from_substrait.o -o from_substrait -Wl,--start-group ${VELOX_ARCHIVES} ${SHARED_LIBRARIES} -Wl,--end-group
+
+veloxmodule.o: veloxmodule.cpp
+	c++ veloxmodule.cpp -o veloxmodule.o ${FLAGS} -I${PYTHON_INCLUDE} ${INCLUDES} ${FLAGS} -fpic -c
+
+velox.so: veloxmodule.o
+	c++ ${FLAGS} veloxmodule.o -o velox.so -Wl,--start-group ${VELOX_ARCHIVES} ${SHARED_LIBRARIES} -Wl,--end-group -shared
+
+cli: from_substrait
+
+python: velox.so
+
+all: from_substrait velox.so
+
+clean:
+	rm velox.so veloxmodule.o from_substrait.o from_substrait
