@@ -2,3 +2,4 @@ from_substrait
 from_substrait.o
 velox.so
 veloxmodule.o
+results.txt
