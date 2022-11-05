@@ -51,8 +51,16 @@ extern "C"
         char *argv_arr[] = { arg };
         char **argv = argv_arr;
         int argc = 1;
-        InitVelox(&argc, &argv);
-        return m;
+        try
+        {
+            InitVelox(&argc, &argv);
+            return m;
+        }
+        catch (const facebook::velox::VeloxException &e)
+        {
+            PyErr_SetString(VeloxError, e.message().c_str());
+            return NULL;
+        }
     }
 
     static PyObject *velox_from_json(PyObject *self, PyObject *arg)
