@@ -16,12 +16,14 @@ FOLLY_LIB = $(shell find ${VELOX_BIN} -name "libfolly.a")
 PROTO_LIB = $(shell find ${VELOX_BIN} -name "libprotobuf.a")
 MD5_LIB = $(shell find ${VELOX_BIN} -name "libmd5.a")	
 DUCKDB_LIB = $(shell find ${VELOX_BIN} -name "libduckdb.a") $(shell find ${VELOX_BIN} -name "libtpch_extension.a") $(shell find ${VELOX_BIN} -name "libdbgen.a")
-ARROW_LIB = ${VELOX_BIN}/third_party/arrow_ep/install/lib64/*.a
+# ARROW_LIB = ${VELOX_BIN}/third_party/arrow_ep/install/lib64/*.a
+ARROW_LIB =
+THRIFT_LIB = $(shell find ${VELOX_BIN} -name "libthrift.a")
 
-VELOX_ARCHIVES = ${VELOX_LIB} ${FOLLY_LIB} ${PROTO_LIB} ${MD5_LIB} ${DUCKDB_LIB} ${ARROW_LIB}
-SHARED_LIBRARIES = -lglog -lgflags -lpthread -lfmt -ldl -levent -ldouble-conversion -lre2 -lboost_atomic -lboost_program_options -lboost_context -lboost_filesystem -lboost_regex -lboost_thread -lboost_system -lboost_date_time -L/usr/lib64 -lsnappy -llz4 -lzstd -lz -levent_openssl -lcrypto
+VELOX_ARCHIVES = ${VELOX_LIB} ${FOLLY_LIB} ${PROTO_LIB} ${MD5_LIB} ${DUCKDB_LIB} ${ARROW_LIB} ${THRIFT_LIB}
+SHARED_LIBRARIES = -lglog -lgflags -lpthread -lfmt -ldl -levent -ldouble-conversion -lre2 -lboost_atomic -lboost_program_options -lboost_context -lboost_filesystem -lboost_regex -lboost_thread -lboost_system -lboost_date_time -L/usr/lib64 -lsnappy -llz4 -lzstd -lz -levent_openssl -lcrypto ${EXTRA_LIBS}
 
-PYTHON_VERSION = $(shell python -c "import sys; print('%d.%d' % sys.version_info[:2])")
+PYTHON_VERSION ?= $(shell python -c "import sys; print('%d.%d' % sys.version_info[:2])")
 PYTHON_INCLUDE = /usr/include/python${PYTHON_VERSION}
 
 .PHONY: all python cli clean
