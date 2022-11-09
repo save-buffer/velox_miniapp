@@ -1,25 +1,18 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#include <dlfcn.h>
-
 #include "velox_common.h"
 
 #include <velox/vector/arrow/Bridge.h>
 #include <arrow/c/bridge.h>
-
-namespace arrow::py
-{
-    PyObject *wrap_batch(const std::shared_ptr<arrow::RecordBatch> &batch);
-    int import_pyarrow();
-}
 
 extern "C"
 {
     PyMODINIT_FUNC PyInit_velox(void);
 }
 
-static bool PyArrowImported = false;
+static PyObject *PyArrow = NULL;
+static PyObject *(*PyArrowWrapBatch)(std::shared_ptr<arrow::RecordBatch> const &) = NULL;
 
 static PyObject *Velox_FromJson(PyObject *self, PyObject *arg);
 
@@ -27,11 +20,13 @@ static PyObject *VeloxResultIterator_Iter(PyObject *self);
 static PyObject *VeloxResultIterator_Next(PyObject *self);
 static void      VeloxResultIterator_Dealloc(PyObject *self);
 
-static PyObject *VeloxResult_ToArrow(PyObject *self, PyObject *arg);
-static PyObject *VeloxResult_Str(PyObject *self);
-static PyObject *VeloxResult_Iter(PyObject *self);
-static PyObject *VeloxResult_Next(PyObject *self);
-static void      VeloxResult_Dealloc(PyObject *self);
+static PyObject *VeloxVector_ToArrow(PyObject *self, PyObject *arg);
+static PyObject *VeloxVector_Str(PyObject *self);
+static PyObject *VeloxVector_Iter(PyObject *self);
+static void      VeloxVector_Dealloc(PyObject *self);
+
+static PyObject *VeloxVectorIterator_Next(PyObject *self);
+static void      VeloxVectorIterator_Dealloc(PyObject *self);
 
 static PyObject *VeloxRow_Str(PyObject *self);
 static void      VeloxRow_Dealloc(PyObject *self);
@@ -70,31 +65,47 @@ static PyTypeObject VeloxResultIteratorType =
     .tp_iternext = VeloxResultIterator_Next,
 };
 
-struct VeloxResult
+struct VeloxVector
 {
     PyObject_HEAD;
-    facebook::velox::vector_size_t row_idx;
-    facebook::velox::RowVectorPtr result;
+    facebook::velox::RowVectorPtr vector;
     std::shared_ptr<facebook::velox::exec::Task> task;
 };
 
-static PyMethodDef VeloxResultMethods[] =
+static PyMethodDef VeloxVectorMethods[] =
 {
-    { "to_arrow", VeloxResult_ToArrow, METH_NOARGS, "Convert the result to a PyArrow array" },
+    { "to_arrow", VeloxVector_ToArrow, METH_NOARGS, "Convert the result to a PyArrow array" },
     { NULL, NULL, 0, NULL },
 };
 
-static PyTypeObject VeloxResultType =
+static PyTypeObject VeloxVectorType =
 {
     PyObject_HEAD_INIT(NULL)
-    .tp_name = "velox.Result",
-    .tp_basicsize = sizeof(VeloxResult),
-    .tp_dealloc = VeloxResult_Dealloc,
-    .tp_str = VeloxResult_Str,
+    .tp_name = "velox.Vector",
+    .tp_basicsize = sizeof(VeloxVector),
+    .tp_dealloc = VeloxVector_Dealloc,
+    .tp_str = VeloxVector_Str,
     .tp_doc = PyDoc_STR("Result of a Velox query"),
-    .tp_iter = VeloxResult_Iter,
-    .tp_iternext = VeloxResult_Next,
-    .tp_methods = VeloxResultMethods,
+    .tp_iter = VeloxVector_Iter,
+    .tp_methods = VeloxVectorMethods,
+};
+
+struct VeloxVectorIterator
+{
+    PyObject_HEAD;
+    facebook::velox::vector_size_t row_idx;
+    facebook::velox::RowVectorPtr vector;
+    std::shared_ptr<facebook::velox::exec::Task> task;
+};
+
+static PyTypeObject VeloxVectorIteratorType =
+{
+    PyObject_HEAD_INIT(NULL)
+    .tp_name = "velox.VectorIterator",
+    .tp_basicsize = sizeof(VeloxVectorIterator),
+    .tp_dealloc = VeloxVectorIterator_Dealloc,
+    .tp_doc = PyDoc_STR("Iterator over a Velox Vector"),
+    .tp_iternext = VeloxVectorIterator_Next,
 };
 
 struct VeloxRow
@@ -136,7 +147,9 @@ PyInit_velox(void)
 
     if(PyType_Ready(&VeloxResultIteratorType) < 0)
         return NULL;
-    if(PyType_Ready(&VeloxResultType) < 0)
+    if(PyType_Ready(&VeloxVectorType) < 0)
+        return NULL;
+    if(PyType_Ready(&VeloxVectorIteratorType) < 0)
         return NULL;
     if(PyType_Ready(&VeloxRowType) < 0)
         return NULL;
@@ -201,10 +214,10 @@ static PyObject *VeloxResultIterator_Next(PyObject *self)
         return NULL;
     }
 
-    VeloxResult *result = PyObject_New(VeloxResult, &VeloxResultType);
-    std::memset(&result->result, 0, sizeof(result->result));
+    VeloxVector *result = PyObject_New(VeloxVector, &VeloxVectorType);
+    std::memset(&result->vector, 0, sizeof(result->vector));
     std::memset(&result->task, 0, sizeof(result->task));
-    result->result = std::move(next);
+    result->vector = std::move(next);
     result->task = _self->task;
     return (PyObject *)result;
 }
@@ -215,19 +228,23 @@ static void VeloxResultIterator_Dealloc(PyObject *self)
     _self->task.reset();
 }
 
-static PyObject *VeloxResult_ToArrow(PyObject *self, PyObject *args)
+static PyObject *VeloxVector_ToArrow(PyObject *self, PyObject *args)
 {
-    if(!PyArrowImported)
+    if(!PyArrow)
     {
-        if(arrow::py::import_pyarrow() < 0)
+        PyArrow = PyImport_ImportModule("pyarrow");
+        if(!PyArrow)
             return NULL;
-        PyArrowImported = true;
+
+        PyArrowWrapBatch = (decltype(PyArrowWrapBatch))PyCapsule_Import("__pyx_api_f_7pyarrow_3lib_pyarrow_wrap_batch", 0);
+        if(PyArrowWrapBatch == NULL)
+            return NULL;
     }
-    VeloxResult *_self = (VeloxResult *)self;
+    VeloxVector *_self = (VeloxVector *)self;
     ArrowArray arrow_array;
     ArrowSchema arrow_schema;
-    facebook::velox::exportToArrow(_self->result, arrow_array);
-    facebook::velox::exportToArrow(_self->result, arrow_schema);
+    facebook::velox::exportToArrow(_self->vector, arrow_array);
+    facebook::velox::exportToArrow(_self->vector, arrow_schema);
     arrow::Result<std::shared_ptr<arrow::RecordBatch>> maybe_rb = arrow::ImportRecordBatch(&arrow_array, &arrow_schema);
     if(!maybe_rb.ok())
     {
@@ -235,27 +252,39 @@ static PyObject *VeloxResult_ToArrow(PyObject *self, PyObject *args)
         return NULL;
     }
     std::shared_ptr<arrow::RecordBatch> rb = maybe_rb.MoveValueUnsafe();
-    return arrow::py::wrap_batch(rb);
+    return PyArrowWrapBatch(rb);
 }
 
-static PyObject *VeloxResult_Str(PyObject *self)
+static PyObject *VeloxVector_Str(PyObject *self)
 {
-    VeloxResult *_self = (VeloxResult *)self;
-    std::string str = _self->result->toString();
+    VeloxVector *_self = (VeloxVector *)self;
+    std::string str = _self->vector->toString();
     return PyUnicode_FromString(str.c_str());
 }
 
-static PyObject *VeloxResult_Iter(PyObject *self)
+static PyObject *VeloxVector_Iter(PyObject *self)
 {
-    VeloxResult *_self = (VeloxResult *)self;
-    _self->row_idx = 0;
-    return self;
+    VeloxVector *_self = (VeloxVector *)self;
+    VeloxVectorIterator *iter = PyObject_New(VeloxVectorIterator, &VeloxVectorIteratorType);
+    std::memset(&iter->vector, 0, sizeof(iter->vector));
+    std::memset(&iter->task, 0, sizeof(iter->task));
+    iter->row_idx = 0;
+    iter->vector = _self->vector;
+    iter->task = _self->task;
+    return (PyObject *)iter;
 }
 
-static PyObject *VeloxResult_Next(PyObject *self)
+static void VeloxVector_Dealloc(PyObject *self)
 {
-    VeloxResult *_self = (VeloxResult *)self;
-    if(_self->row_idx == _self->result->size())
+    VeloxVector *_self = (VeloxVector *)self;
+    _self->vector.reset();
+    _self->task.reset();
+}
+
+static PyObject *VeloxVectorIterator_Next(PyObject *self)
+{
+    VeloxVectorIterator *_self = (VeloxVectorIterator *)self;
+    if(_self->row_idx == _self->vector->size())
     {
         PyErr_SetNone(PyExc_StopIteration);
         return NULL;
@@ -265,15 +294,15 @@ static PyObject *VeloxResult_Next(PyObject *self)
     std::memset(&next->vector, 0, sizeof(next->vector));
     std::memset(&next->task, 0, sizeof(next->task));
     next->row_idx = _self->row_idx++;
-    next->vector = _self->result;
+    next->vector = _self->vector;
     next->task = _self->task;
     return (PyObject *)next;
 }
 
-static void VeloxResult_Dealloc(PyObject *self)
+static void VeloxVectorIterator_Dealloc(PyObject *self)
 {
-    VeloxResult *_self = (VeloxResult *)self;
-    _self->result.reset();
+    VeloxVectorIterator *_self = (VeloxVectorIterator *)self;
+    _self->vector.reset();
     _self->task.reset();
 }
 
