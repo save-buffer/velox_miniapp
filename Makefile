@@ -7,10 +7,10 @@ XSIMD_SRC = ${VELOX_ROOT}/third_party/xsimd/include
 GTEST_SRC = ${VELOX_ROOT}/third_party/googletest/googletest/include
 PROTOBUF_SRC = ${VELOX_BIN}/_deps/protobuf-src/src
 XXHASH_SRC = ${VELOX_ROOT}/velox/external/xxhash
-ARROW_SRC = ${VELOX_BIN}/third_party/arrow_ep/src/arrow_ep/cpp/src
+ARROW_SRC = ${VELOX_BIN}/third_party/arrow_ep/install/include
 
 INCLUDES = -I${VELOX_SRC} -I${FOLLY_SRC} -I${FOLLY_SRC}/../folly-build -I${XSIMD_SRC} -I${GTEST_SRC} -I${PROTOBUF_SRC} -I${VELOX_GEN} -I${XXHASH_SRC} -I${ARROW_SRC}
-FLAGS = -O3 -std=gnu++17 -mavx -pthread -ggdb
+FLAGS = -std=gnu++17 -mavx -pthread -ggdb
 
 VELOX_LIB = $(shell find ${VELOX_BIN} -name "libvelox*.a")
 FOLLY_LIB = $(shell find ${VELOX_BIN} -name "libfolly.a")
