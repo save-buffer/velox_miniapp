@@ -12,9 +12,10 @@ extern "C"
     PyMODINIT_FUNC PyInit_velox(void);
 }
 
-static PyObject *(*PyArrowWrapBatch)(std::shared_ptr<arrow::RecordBatch> const &) = NULL;
+static PyObject *PyArrowRecordBatchClass = NULL;
 
 static PyObject *Velox_FromJson(PyObject *self, PyObject *arg);
+static void      Velox_Dealloc(void *self);
 
 static PyObject *VeloxResultIterator_Iter(PyObject *self);
 static PyObject *VeloxResultIterator_Next(PyObject *self);
@@ -45,7 +46,8 @@ static PyModuleDef VeloxModule =
     "velox",
     "Run substrait plans using Velox",
     -1,
-    VeloxMethods
+    VeloxMethods,
+    .m_free = Velox_Dealloc,
 };
 
 struct VeloxResultIterator
@@ -198,9 +200,13 @@ static PyObject *Velox_FromJson(PyObject *self, PyObject *arg)
     }
 }
 
+static void Velox_Dealloc(void *)
+{
+    Py_XDECREF(PyArrowRecordBatchClass);
+}
+
 static PyObject *VeloxResultIterator_Iter(PyObject *self)
 {
-    Py_INCREF(self);
     return self;
 }
 
@@ -230,7 +236,7 @@ static void VeloxResultIterator_Dealloc(PyObject *self)
 
 static PyObject *VeloxVector_ToArrow(PyObject *self, PyObject *args)
 {
-    if(!PyArrowWrapBatch)
+    if(!PyArrowRecordBatchClass)
     {
         struct AutoPyObject
         {
@@ -245,25 +251,22 @@ static PyObject *VeloxVector_ToArrow(PyObject *self, PyObject *args)
         if(!pyarrow)
             return NULL;
 
-        AutoPyObject c_api = PyObject_GetAttrString(pyarrow, (char *)"__pyx_capi__");
-        if(!c_api)
+        AutoPyObject dict = PyModule_GetDict(pyarrow);
+        if(!dict)
             return NULL;
 
-        PyObject *function_pointer = PyDict_GetItemString(c_api, "pyarrow_wrap_batch");
-        if(!function_pointer)
+        PyArrowRecordBatchClass = PyDict_GetItemString(dict, "RecordBatch");
+        if(!PyArrowRecordBatchClass)
             return NULL;
-
-        PyArrowWrapBatch = (decltype(PyArrowWrapBatch))PyCapsule_GetPointer(function_pointer, "PyObject *(std::shared_ptr< arrow::RecordBatch>  const &)");
-        if(!PyArrowWrapBatch)
-            return NULL;
+        Py_XINCREF(PyArrowRecordBatchClass);
     }
     VeloxVector *_self = (VeloxVector *)self;
-    ArrowSchema arrow_schema;
     ArrowArray arrow_array;
+    ArrowSchema arrow_schema;
     try
     {
         facebook::velox::exportToArrow(_self->vector, arrow_schema);
-        facebook::velox::exportToArrow(_self->vector, arrow_array);
+        facebook::velox::exportToArrow(_self->vector, arrow_array, _self->vector->pool());
         _self->vector.reset();
     }
     catch(const facebook::velox::VeloxException &e)
@@ -271,16 +274,7 @@ static PyObject *VeloxVector_ToArrow(PyObject *self, PyObject *args)
         PyErr_SetString(VeloxError, e.message().c_str());
         return NULL;
     }
-
-    arrow::Result<std::shared_ptr<arrow::RecordBatch>> maybe_rb = arrow::ImportRecordBatch(&arrow_array, &arrow_schema);
-    if(!maybe_rb.ok())
-    {
-        PyErr_SetString(VeloxError, maybe_rb.status().message().c_str());
-        return NULL;
-    }
-    std::shared_ptr<arrow::RecordBatch> rb = maybe_rb.MoveValueUnsafe();
-    std::cout << rb->ToString() << std::endl;
-    PyObject *result = PyArrowWrapBatch(rb);
+    PyObject *result = PyObject_CallMethod(PyArrowRecordBatchClass, "_import_from_c", "KK", (uintptr_t)&arrow_array, (uintptr_t)&arrow_schema);
     return result;
 }
 
