@@ -28,13 +28,13 @@ PYTHON_INCLUDE = /usr/include/python${PYTHON_VERSION}
 .PHONY: all python cli clean
 .DEFAULT_GOAL = all
 
-from_substrait.o: from_substrait.cpp
+from_substrait.o: from_substrait.cpp velox_common.h
 	c++ from_substrait.cpp -o from_substrait.o ${FLAGS} ${INCLUDES} -c
 
 from_substrait: from_substrait.o
 	c++ ${FLAGS} from_substrait.o -o from_substrait -Wl,--start-group ${VELOX_ARCHIVES} ${SHARED_LIBRARIES} -Wl,--end-group
 
-veloxmodule.o: veloxmodule.cpp
+veloxmodule.o: veloxmodule.cpp velox_common.h
 	c++ veloxmodule.cpp -o veloxmodule.o ${FLAGS} -I${PYTHON_INCLUDE} ${INCLUDES} ${FLAGS} -fpic -c
 
 velox.so: veloxmodule.o

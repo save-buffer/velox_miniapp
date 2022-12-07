@@ -30,7 +30,7 @@ void InitVelox(int *argc, char ***argv)
 
 std::shared_ptr<facebook::velox::exec::Task> ExecuteSubstrait(substrait::Plan &substrait_plan, bool print_plan = false)
 {
-    std::shared_ptr<facebook::velox::core::QueryCtx> ctx = facebook::velox::core::QueryCtx::createForTest();
+    auto ctx = std::make_shared<facebook::velox::core::QueryCtx>();
     facebook::velox::substrait::SubstraitVeloxPlanConverter converter(ctx->pool());
     std::shared_ptr<const facebook::velox::core::PlanNode> plan_node = converter.toVeloxPlan(substrait_plan);
     if(print_plan)
