@@ -32,8 +32,6 @@ static void      VeloxVectorIterator_Dealloc(PyObject *self);
 static PyObject *VeloxRow_Str(PyObject *self);
 static void      VeloxRow_Dealloc(PyObject *self);
 
-static void      VeloxRecordBatch_Dealloc(PyObject *self);
-
 static PyObject *VeloxError;
 
 static PyMethodDef VeloxMethods[] =
@@ -130,14 +128,6 @@ static PyTypeObject VeloxRowType =
     .tp_doc = PyDoc_STR("Object representing a Velox row"),
 };
 
-static PyTypeObject VeloxRecordBatchType =
-{
-    PyObject_HEAD_INIT(NULL)
-    .tp_name = "velox.RecordBatch",
-    .tp_dealloc = VeloxRecordBatch_Dealloc,
-    .tp_doc = PyDoc_STR("Velox wrapper around an Arrow RecordBatch")
-};
-
 static int ImportPyArrowRecordBatch()
 {
     if(!PyArrowRecordBatchClass)
@@ -164,15 +154,7 @@ static int ImportPyArrowRecordBatch()
             return -1;
         Py_XINCREF(PyArrowRecordBatchClass);
     }
-    PyTypeObject *arrow_rb_type = (PyTypeObject *)PyArrowRecordBatchClass;
-    VeloxRecordBatchType = *arrow_rb_type;
-    VeloxRecordBatchType.tp_basicsize += sizeof(std::shared_ptr<facebook::velox::exec::Task>);
-    VeloxRecordBatchType.tp_base = arrow_rb_type;
-    VeloxRecordBatchType.tp_flags |= Py_TPFLAGS_BASETYPE;
-    VeloxRecordBatchType.tp_dealloc = VeloxRecordBatch_Dealloc;
-    VeloxRecordBatchType.tp_name = "velox.RecordBatch";
-    VeloxRecordBatchType.tp_doc = PyDoc_STR("Velox wrapper around an Arrow RecordBatch");
-    return PyType_Ready(&VeloxRecordBatchType);
+    return 0;
 }
 
 PyMODINIT_FUNC
@@ -299,16 +281,30 @@ static PyObject *VeloxVector_ToArrow(PyObject *self, PyObject *args)
         PyErr_SetString(VeloxError, e.message().c_str());
         return NULL;
     }
+
+    struct Backup
+    {
+        void (*original_release)(struct ArrowArray *);
+        void *original_data;
+        std::shared_ptr<facebook::velox::exec::Task> task;
+    };
+
+    Backup *backup = new Backup;
+    backup->original_release = arrow_array.release;
+    backup->original_data = arrow_array.private_data;
+    backup->task = _self->task;
+    arrow_array.private_data = (void *)backup;
+    arrow_array.release = [](ArrowArray *arr)
+    {
+        Backup *b = (Backup *)arr->private_data;
+        arr->release = b->original_release;
+        arr->private_data = b->original_data;
+        arr->release(arr);
+        delete b;
+    };
+
     PyObject *arrow_rb = PyObject_CallMethod(PyArrowRecordBatchClass, "_import_from_c", "KK", (uintptr_t)&arrow_array, (uintptr_t)&arrow_schema);
-    PyObject *velox_rb = _PyObject_GC_New(&VeloxRecordBatchType);
-    std::memset(velox_rb + 1, 0, VeloxRecordBatchType.tp_basicsize - sizeof(PyObject));
-    std::memcpy(velox_rb + 1, arrow_rb + 1, ((PyTypeObject *)PyArrowRecordBatchClass)->tp_basicsize - sizeof(PyObject));
-    PyObject_GC_UnTrack(arrow_rb);
-    PyObject_GC_Del(arrow_rb);
-    arrow_rb->ob_refcnt = 0;
-    uint8_t *task_ptr = (((uint8_t *)velox_rb) + VeloxRecordBatchType.tp_basicsize - sizeof(std::shared_ptr<facebook::velox::exec::Task>));
-    *(std::shared_ptr<facebook::velox::exec::Task> *)task_ptr = _self->task;
-    return velox_rb;
+    return arrow_rb;
 }
 
 static PyObject *VeloxVector_Str(PyObject *self)
@@ -402,17 +398,3 @@ static void VeloxRow_Dealloc(PyObject *self)
     }
 }
 
-static void VeloxRecordBatch_Dealloc(PyObject *self)
-{
-    ((PyTypeObject *)PyArrowRecordBatchClass)->tp_dealloc(self);
-    uint8_t *task_ptr = (((uint8_t *)self) + VeloxRecordBatchType.tp_basicsize - sizeof(std::shared_ptr<facebook::velox::exec::Task>));
-    try
-    {
-        ((std::shared_ptr<facebook::velox::exec::Task> *)task_ptr)->reset();
-    }
-    catch(const facebook::velox::VeloxException &e)
-    {
-        PyErr_SetString(VeloxError, e.message().c_str());
-    }
-
-}
